@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thai ALPR Dashboard</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --fg:#e8e8e8; --muted:#8a90a0; --ok:#3ddc84; --warn:#ffb347; --bad:#ff5c5c; --acc:#5aa9ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Tahoma, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:16px 24px; border-bottom:1px solid #262a33; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:18px; margin:0; }
+  header .dot { width:10px; height:10px; border-radius:50%; background:var(--bad); }
+  header .dot.on { background:var(--ok); }
+  main { display:grid; grid-template-columns: 1fr 1fr; gap:16px; padding:16px 24px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border-radius:10px; padding:16px; }
+  .card h2 { font-size:14px; color:var(--muted); margin:0 0 12px; text-transform:uppercase; letter-spacing:.05em; }
+  .stats { display:grid; grid-template-columns: repeat(4,1fr); gap:12px; }
+  .stat b { display:block; font-size:26px; }
+  .stat span { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid #262a33; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .plate { font-size:18px; font-weight:700; letter-spacing:.04em; }
+  .tag { padding:2px 8px; border-radius:999px; font-size:12px; background:#262a33; }
+  .tag.allowed { background:rgba(61,220,132,.15); color:var(--ok); }
+  .drop { border:2px dashed #2f3542; border-radius:10px; padding:24px; text-align:center; color:var(--muted); cursor:pointer; }
+  .drop.over { border-color:var(--acc); color:var(--acc); }
+  #preview { max-width:100%; border-radius:8px; margin-top:12px; display:none; }
+  pre { background:#0f1115; padding:12px; border-radius:8px; overflow:auto; font-size:12px; }
+  .full { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Thai ALPR</h1>
+  <span class="dot" id="dot"></span>
+  <span id="conn" style="color:var(--muted);font-size:13px">connecting…</span>
+  <span style="margin-left:auto;color:var(--muted);font-size:13px" id="plugins"></span>
+</header>
+<main>
+  <section class="card full">
+    <h2>สถานะ</h2>
+    <div class="stats">
+      <div class="stat"><b id="fps">0</b><span>FPS</span></div>
+      <div class="stat"><b id="frames">0</b><span>เฟรม</span></div>
+      <div class="stat"><b id="emitted">0</b><span>อ่านได้</span></div>
+      <div class="stat"><b id="dropped">0</b><span>ดรอป</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>ทดสอบรูป</h2>
+    <div class="drop" id="drop">ลากรูปมาวาง หรือคลิกเลือกไฟล์</div>
+    <input type="file" id="file" accept="image/*" hidden>
+    <img id="preview" alt="">
+    <pre id="json"></pre>
+  </section>
+
+  <section class="card">
+    <h2>เหตุการณ์ล่าสุด (live)</h2>
+    <table>
+      <thead><tr><th>เวลา</th><th>ทะเบียน</th><th>จังหวัด</th><th>ประเภท</th><th>conf</th><th>ต้นทาง</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const rows = document.getElementById('rows');
+const fmt = ts => new Date(ts*1000).toLocaleTimeString('th-TH');
+function addRow(e, top=true){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${fmt(e.ts)}</td><td class="plate">${e.plate||'?'}</td><td>${e.province||'-'}</td>
+    <td><span class="tag ${e.allowed?'allowed':''}">${e.plate_type}</span></td><td>${(+e.conf).toFixed(2)}</td><td>${e.source}</td>`;
+  top ? rows.prepend(tr) : rows.append(tr);
+  while (rows.children.length > 50) rows.lastChild.remove();
+}
+fetch('/events?limit=30').then(r=>r.json()).then(list => list.forEach(e => addRow(e,false)));
+fetch('/plugins').then(r=>r.json()).then(p => document.getElementById('plugins').textContent =
+  `plugins: ${p.input.length} input · ${p.filter.length} filter · ${p.output.length} output`);
+
+async function poll(){
+  try { const s = await (await fetch('/stats')).json();
+    for (const k of ['fps','frames','emitted','dropped']) document.getElementById(k).textContent = s[k];
+  } catch(e){}
+  setTimeout(poll, 2000);
+}
+poll();
+
+function connect(){
+  const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
+  ws.onopen = () => { document.getElementById('dot').classList.add('on'); document.getElementById('conn').textContent='live'; };
+  ws.onmessage = m => addRow(JSON.parse(m.data));
+  ws.onclose = () => { document.getElementById('dot').classList.remove('on'); document.getElementById('conn').textContent='reconnecting…'; setTimeout(connect, 2000); };
+}
+connect();
+
+const drop = document.getElementById('drop'), file = document.getElementById('file');
+drop.onclick = () => file.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); send(e.dataTransfer.files[0]); };
+file.onchange = () => send(file.files[0]);
+async function send(f){
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  const j = await (await fetch('/detect', {method:'POST', body:fd})).json();
+  document.getElementById('json').textContent = JSON.stringify(j, null, 2);
+  const fd2 = new FormData(); fd2.append('file', f);
+  const blob = await (await fetch('/detect?annotate=1', {method:'POST', body:fd2})).blob();
+  const img = document.getElementById('preview'); img.src = URL.createObjectURL(blob); img.style.display='block';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+# Thai ALPR pipeline config. Enable/disable any plugin with `enabled: false`.
+# Run:  python -m thai_alpr.cli serve -c configs/default.yaml   (dashboard on :8000)
+#       python -m thai_alpr.cli run   -c configs/default.yaml   (headless)
+
+engine:
+  track: true                 # ByteTrack on video streams + majority vote per vehicle
+  emit_every_frame: false     # true = fire outputs on every frame, not only when a track settles
+  detector:
+    weights: models/plate.pt  # from scripts/train.py plate (missing = whole frame treated as one plate)
+    conf: 0.4
+    imgsz: 640
+  reader:
+    chars_weights: models/chars.pt        # from scripts/train.py chars    (missing = EasyOCR fallback)
+    province_weights: models/province.pt  # from scripts/train.py province (missing = EasyOCR + fuzzy)
+    conf: 0.3
+    top_ratio: 0.62           # fraction of plate height that is the top (chars) line
+  voter:
+    window: 15
+    min_votes: 3
+
+queue_size: 8
+
+inputs:
+  - type: camera
+    id: webcam
+    source: 0                 # int = webcam index, or "video.mp4", or "rtsp://user:pass@ip/stream"
+    fps_limit: 15
+    enabled: false            # set true when a webcam is plugged in
+
+  - type: esp32cam
+    id: gate1
+    host: 192.168.1.50        # ESP32-CAM IP (see firmware/esp32cam_streamer)
+    mode: snapshot            # snapshot | stream
+    fps: 4
+    enabled: false
+
+  - type: folder
+    id: test_images
+    path: data/test_images
+    enabled: false
+
+  # http_push:api is added automatically by `serve` so ESP32 can POST to /ingest/<device>
+
+filters:
+  - type: min_conf
+    threshold: 0.25
+  - type: dedupe
+    seconds: 10
+  - type: allowlist
+    path: configs/allowlist.txt
+    block_others: false       # true = only allowlisted plates reach outputs
+
+outputs:
+  - type: console
+  - type: sqlite
+    path: data/events.db
+  - type: jsonl
+    path: logs/events.jsonl
+    enabled: false
+  - type: save_crops
+    dir: data/crops
+    enabled: false
+  - type: mqtt                # ESP32 relay/gate subscribes to command_topic (firmware/esp32_gate_mqtt)
+    host: localhost
+    port: 1883
+    topic: alpr/events
+    command_topic: alpr/gate1/cmd
+    enabled: false
+  - type: webhook
+    url: http://localhost:1880/alpr      # Node-RED / Home Assistant / own backend
+    enabled: false
+  - type: serial              # ESP32 on USB, reads "PLATE|PROVINCE|TYPE|CONF|ALLOWED"
+    port: COM3
+    baud: 115200
+    enabled: false
+  - type: line_notify
+    token: YOUR_LINE_NOTIFY_TOKEN
+    only_allowed: false
+    enabled: false

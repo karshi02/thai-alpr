@@ -1,0 +1,3 @@
+# one plate per line, spaces optional. lines starting with # are ignored
+1กข 1234
+ขค 5678

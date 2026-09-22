@@ -1,0 +1,16 @@
+# torch/torchvision: install first from https://download.pytorch.org/whl/cu121
+ultralytics>=8.2
+opencv-python
+albumentations
+numpy
+pillow
+pyyaml
+requests
+rapidfuzz
+easyocr
+fastapi
+uvicorn[standard]
+python-multipart
+paho-mqtt
+pyserial
+roboflow
